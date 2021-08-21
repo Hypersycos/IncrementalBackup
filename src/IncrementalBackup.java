@@ -1,6 +1,7 @@
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -10,15 +11,109 @@ import java.util.regex.Pattern;
 public class IncrementalBackup
 {
     private static final String removedString = "removed";
-    private Path backupPath;
+    private static final String protectedFile = "journal";
+    private final Path backupPath;
     private int fullBackupSequence = 0;
     private int incrementalBackupSequence = 0;
-    private Path directory;
+    private final Path directory;
     private Set<Path> trackedFiles = new HashSet<>();
 
-    public synchronized void restore(int fullSequence, int incrementalSequence, Path restoreDirectory) throws IOException
+    public IncrementalBackup(Path directory, Path backupPath)
     {
-        restoreDirectory(backupPath, fullSequence, incrementalSequence, restoreDirectory);
+        this.backupPath = backupPath;
+        this.directory = directory;
+        File journal = backupPath.resolve(protectedFile).toFile();
+        try (Scanner journalScanner = new Scanner(journal))
+        {
+            fullBackupSequence = Integer.parseInt(journalScanner.nextLine());
+            incrementalBackupSequence = Integer.parseInt(journalScanner.nextLine());
+            while (journalScanner.hasNextLine())
+            {
+                trackedFiles.add(Paths.get(journalScanner.nextLine()));
+            }
+        }
+        catch (FileNotFoundException | NumberFormatException | NoSuchElementException e)
+        {
+            //search for highest numbers
+            //get tracked files
+        }
+
+    }
+
+    /**
+     * Writes backup journal
+     * @throws IOException Thrown if unable to create temporary file, or unable to overwrite journal
+     */
+    private void writeJournal() throws IOException
+    {
+        File tempJournal = File.createTempFile("tempJournal",".tmp");
+        try(BufferedWriter bw = new BufferedWriter(new FileWriter(tempJournal)))
+        {
+            bw.write(String.valueOf(fullBackupSequence));
+            bw.newLine();
+            bw.write(String.valueOf(incrementalBackupSequence));
+            bw.newLine();
+            for (Path path : trackedFiles)
+            {
+                bw.write(path.toString());
+                bw.newLine();
+            }
+        }
+        Files.copy(tempJournal.toPath(), backupPath.resolve(protectedFile), StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /**
+     * Restores version fullSequence.incrementalSequence to restorePath
+     * @throws IOException Thrown if unable to copy a file
+     */
+    public synchronized void restore() throws IOException
+    {
+        restoreDirectory(backupPath, fullBackupSequence, incrementalBackupSequence, directory);
+    }
+
+    /**
+     * Restores version fullSequence.incrementalSequence to restorePath
+     * @throws IOException Thrown if unable to copy a file
+     */
+    public synchronized void restore(Path restorePath) throws IOException
+    {
+        restoreDirectory(backupPath, fullBackupSequence, incrementalBackupSequence, restorePath);
+    }
+
+    /**
+     * Restores version fullSequence.incrementalSequence to restorePath
+     * @throws IOException Thrown if unable to copy a file
+     */
+    public synchronized void restore(int fullSequence) throws IOException
+    {
+        restoreDirectory(backupPath, fullSequence, Integer.MAX_VALUE, directory);
+    }
+
+    /**
+     * Restores version fullSequence.incrementalSequence to restorePath
+     * @throws IOException Thrown if unable to copy a file
+     */
+    public synchronized void restore(Path restorePath, int fullSequence) throws IOException
+    {
+        restoreDirectory(backupPath, fullSequence, Integer.MAX_VALUE, restorePath);
+    }
+
+    /**
+     * Restores version fullSequence.incrementalSequence to restorePath
+     * @throws IOException Thrown if unable to copy a file
+     */
+    public synchronized void restore(int fullSequence, int incrementalSequence) throws IOException
+    {
+        restoreDirectory(backupPath, fullSequence, incrementalSequence, directory);
+    }
+
+    /**
+     * Restores version fullSequence.incrementalSequence to restorePath
+     * @throws IOException Thrown if unable to copy a file
+     */
+    public synchronized void restore(int fullSequence, int incrementalSequence, Path restorePath) throws IOException
+    {
+        restoreDirectory(backupPath, fullSequence, incrementalSequence, restorePath);
     }
 
     private class Pair<X, Y> {
@@ -43,6 +138,11 @@ public class IncrementalBackup
         }
     }
 
+    /**
+     * Gets original name, full and partial backup version of file
+     * @param file file to get info of
+     * @return Original Name, Full backup number, Partial backup number
+     */
     private Triple<String, Integer, Integer> getBackupFileDetails(File file)
     {
         String fullName = file.getName();
@@ -54,14 +154,14 @@ public class IncrementalBackup
         if (fullName.substring(lastDot + 1).equals(removedString))
         { //expect two more
             int secondLast = fullName.substring(0, lastDot).lastIndexOf('.');
-            minor = Integer.parseInt(fullName.substring(secondLast));
+            minor = Integer.parseInt(fullName.substring(secondLast+1,lastDot));
             int thirdLast = fullName.substring(0, secondLast).lastIndexOf('.');
-            major = Integer.parseInt(fullName.substring(thirdLast+1,lastDot));
+            major = Integer.parseInt(fullName.substring(thirdLast+1,secondLast));
             fileName = fullName.substring(0, thirdLast);
         }
         else
         {
-            minor = Integer.parseInt(fullName.substring(lastDot));
+            minor = Integer.parseInt(fullName.substring(lastDot+1));
             int secondLast = fullName.substring(0, lastDot).lastIndexOf('.');
             major = Integer.parseInt(fullName.substring(secondLast+1,lastDot));
             fileName = fullName.substring(0, secondLast);
@@ -72,11 +172,11 @@ public class IncrementalBackup
     /**
      * Recursively restores up a directory
      * @param directory Directory being restored from
-     * @param restoreDirectory Directory to copy to
-     * @throws NoSuchAlgorithmException
-     * @throws NullPointerException
+     * @param restorePath Directory to copy to
+     * @throws NullPointerException Happens if directory doesn't exist
+     * @throws IOException Thrown if unable to copy a file
      */
-    private void restoreDirectory(Path directory, int fullSequence, int incrementalSequence, Path restoreDirectory) throws NullPointerException, IOException
+    private void restoreDirectory(Path directory, int fullSequence, int incrementalSequence, Path restorePath) throws NullPointerException, IOException
     {
         Set<Path> directories = new HashSet<>();
         Map<String, Pair<Integer, File>> files = new HashMap<>();
@@ -89,6 +189,7 @@ public class IncrementalBackup
             }
             else
             {
+                if (file.getName().equals(protectedFile)) continue;
                 Triple<String, Integer, Integer> details = getBackupFileDetails(file);
                 if (details.y != fullSequence || details.z > incrementalSequence) continue;
                 if (files.containsKey(details.x))
@@ -107,9 +208,9 @@ public class IncrementalBackup
         for (String name : files.keySet())
         {
             File file = files.get(name).y;
-            if (file.getName().substring(file.getName().lastIndexOf('.'+1)).equals(removedString)) continue;
+            if (file.getName().substring(file.getName().lastIndexOf('.')+1).equals(removedString)) continue;
 
-            Path newFile = restoreDirectory.resolve(backupPath.relativize(directory)+name);
+            Path newFile = restorePath.resolve(backupPath.relativize(directory)+name);
             if (!Files.exists(newFile.getParent()))
             {
                 if (!newFile.getParent().toFile().mkdirs())
@@ -123,9 +224,9 @@ public class IncrementalBackup
 
     /**
      * Performs a full backup, copying all files, incrementing fullBackupSequence and resetting incrementalBackupSequence
-     * @throws NoSuchAlgorithmException
+     * @throws IOException If unable to write a new journal
      */
-    public synchronized void performFullBackup() throws NoSuchAlgorithmException
+    public synchronized void performFullBackup() throws IOException
     {
         fullBackupSequence++;
         incrementalBackupSequence = 0;
@@ -133,14 +234,14 @@ public class IncrementalBackup
         Set<Exception> exceptions = Collections.synchronizedSet(new HashSet<>());
         backupDirectory(directory, newTrackedFiles, exceptions, true);
         trackedFiles = newTrackedFiles;
+        writeJournal();
     }
 
     /**
      * Performs an incremental backup, copying only files which have changed, incrementing incrementalBackupSequence
-     * @throws NoSuchAlgorithmException
-     * @throws IOException
+     * @throws IOException Thrown if unable to make a backup file
      */
-    public synchronized void performIncrementalBackup() throws NoSuchAlgorithmException, IOException
+    public synchronized void performIncrementalBackup() throws IOException
     {
         incrementalBackupSequence++;
         Set<Path> newTrackedFiles = Collections.synchronizedSet(new HashSet<>());
@@ -152,7 +253,8 @@ public class IncrementalBackup
             {
                 //instead of creating an empty file, create a unique marker for a removed file.
                 //Is the distinction ever useful? I don't know, but maybe.
-                getBackupParentPath(path).resolve(path.getFileName()+"."+fullBackupSequence+"."+incrementalBackupSequence+removedString).toFile().createNewFile();
+                if (!getBackupParentPath(path).resolve(path.getFileName()+"."+fullBackupSequence+"."+incrementalBackupSequence+"."+removedString).toFile().createNewFile())
+                    throw new IOException("Unable to create "+getBackupParentPath(path).resolve(path.getFileName()+"."+fullBackupSequence+"."+incrementalBackupSequence+"."+removedString));
             }
         }
         trackedFiles = newTrackedFiles;
@@ -164,6 +266,7 @@ public class IncrementalBackup
                 System.err.println(e.toString());
             }
         }
+        writeJournal();
     }
 
     /**
@@ -172,10 +275,9 @@ public class IncrementalBackup
      * @param trackedFiles Synchronised list of all files backed up
      * @param failures Synchronised list of all expected exceptions
      * @param isFullBackup Is this a full or incremental backup?
-     * @throws NoSuchAlgorithmException
-     * @throws NullPointerException
+     * @throws NullPointerException Thrown if directory doesn't exist
      */
-    private void backupDirectory(Path directory, Set<Path> trackedFiles, Set<Exception> failures, boolean isFullBackup) throws NoSuchAlgorithmException, NullPointerException
+    private void backupDirectory(Path directory, Set<Path> trackedFiles, Set<Exception> failures, boolean isFullBackup) throws NullPointerException
     {
         for (File file : Objects.requireNonNull(directory.toFile().listFiles()))
         {
@@ -209,10 +311,9 @@ public class IncrementalBackup
     /**
      * If a file has changed, then save a copy.
      * @param file File to backup
-     * @throws NoSuchAlgorithmException
-     * @throws IOException
+     * @throws IOException Thrown if unable to make backup file
      */
-    protected void backupFile(Path file) throws NoSuchAlgorithmException, IOException
+    protected void backupFile(Path file) throws IOException
     {
         File backup = getLatestBackup(file);
         if (hasChanged(backup, file.toFile()))
@@ -224,8 +325,7 @@ public class IncrementalBackup
     /**
      * Save a copy of a file
      * @param file File to backup
-     * @throws NoSuchAlgorithmException
-     * @throws IOException
+     * @throws IOException Thrown if unable to make backup file
      */
     private void copyFile(Path file) throws IOException
     {
@@ -235,7 +335,7 @@ public class IncrementalBackup
         {
             if (!parentDirectory.toFile().mkdirs())
             {
-                throw new IOException("Unable to create "+parentDirectory.toString());
+                throw new IOException("Unable to create "+parentDirectory);
             }
         }
         Files.copy(file, newFile, StandardCopyOption.REPLACE_EXISTING);
@@ -345,13 +445,7 @@ public class IncrementalBackup
     {
         Path parentPath = getBackupParentPath(path);
         String fileName = path.getFileName().toString();
-        return parentPath.toFile().listFiles(new FilenameFilter() {
-            @Override
-            public boolean accept(File dir, String name)
-            {
-                return name.matches(Pattern.quote(fileName+"."+maxFull+".")+"[0-9]+");
-            }
-        });
+        return parentPath.toFile().listFiles((dir, name) -> name.matches(Pattern.quote(fileName + "." + maxFull + ".") + "[0-9]+"));
     }
 
     /**
@@ -359,18 +453,17 @@ public class IncrementalBackup
      * @param oldFile The old copy of the file
      * @param newFile The new copy of the file
      * @return True if different (or unable to read oldFile), False if not
-     * @throws NoSuchAlgorithmException
-     * @throws IOException
+     * @throws IOException Thrown if unable to read newfile
      */
 
-    protected static boolean hasChanged(File oldFile, File newFile) throws NoSuchAlgorithmException, IOException
+    protected static boolean hasChanged(File oldFile, File newFile) throws IOException
     {
         byte[] oldHash;
         try
         {
             oldHash = generateMD5(Files.readAllBytes(oldFile.toPath()));
         }
-        catch (IOException e)
+        catch (IOException | NullPointerException e)
         { //Assume if we can't access the old file, then it doesn't exist (newFile was created since our last backup).
             return true;
         }
@@ -381,13 +474,19 @@ public class IncrementalBackup
     /**
      * Generates an MD5 checksum as a String.
      * @param bytes The data being checksummed.
-     * @return Hex string of the checksum value.
-     * @throws NoSuchAlgorithmException
-     * @throws IOException
+     * @return Byte array of the checksum value.
      */
-    private static byte[] generateMD5(byte[] bytes) throws NoSuchAlgorithmException, IOException
+    private static byte[] generateMD5(byte[] bytes)
     {
-        MessageDigest messageDigest = MessageDigest.getInstance("MD5");
+        MessageDigest messageDigest;
+        try
+        {
+            messageDigest = MessageDigest.getInstance("MD5");
+        }
+        catch (NoSuchAlgorithmException e)
+        {
+            throw new AssertionError("MD5 unavailable");
+        }
         messageDigest.update(bytes);
 
         return messageDigest.digest();
