@@ -220,6 +220,10 @@ public class IncrementalBackup
             }
             Files.copy(file.toPath(), newFile, StandardCopyOption.REPLACE_EXISTING);
         }
+        for (Path subDirectory : directories)
+        {
+            restoreDirectory(subDirectory, fullSequence, incrementalSequence, restorePath);
+        }
     }
 
     /**
