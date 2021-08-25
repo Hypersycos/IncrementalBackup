@@ -1,3 +1,7 @@
+import engine.IncrementalBackup;
+import engine.SwitchingIncrementalBackup;
+import handlers.MCAHandler;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -13,7 +17,8 @@ public class CommandLineTest
         Path directory = Paths.get("").toAbsolutePath().resolve("test_data/main_dir/");//Paths.get(reader.readLine());
         Path backupDir = directory.resolveSibling("backup_dir");//Paths.get(reader.readLine());
         System.out.println(backupDir);
-        IncrementalBackup backup = new IncrementalBackup(directory, backupDir);
+        SwitchingIncrementalBackup backup = new SwitchingIncrementalBackup(directory, backupDir);
+        backup.register(new MCAHandler(), "mca");
         String input = "";
         while (!Objects.equals(input, "exit"))
         {

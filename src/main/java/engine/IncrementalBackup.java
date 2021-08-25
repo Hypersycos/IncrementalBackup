@@ -1,3 +1,7 @@
+package engine;
+
+import util.Pair;
+
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,8 +38,8 @@ public class IncrementalBackup
         }
         catch (FileNotFoundException | NumberFormatException | NoSuchElementException e)
         {
-            //search for highest numbers
-            //get tracked files
+            //TODO: search for highest numbers
+            //TODO: get tracked files
         }
 
     }
@@ -68,7 +72,7 @@ public class IncrementalBackup
      */
     public synchronized void restore() throws IOException
     {
-        restoreDirectory(backupPath, fullBackupSequence, incrementalBackupSequence, directory);
+        restore(fullBackupSequence, incrementalBackupSequence, directory);
     }
 
     /**
@@ -77,7 +81,7 @@ public class IncrementalBackup
      */
     public synchronized void restore(Path restorePath) throws IOException
     {
-        restoreDirectory(backupPath, fullBackupSequence, incrementalBackupSequence, restorePath);
+        restore(fullBackupSequence, incrementalBackupSequence, restorePath);
     }
 
     /**
@@ -86,7 +90,7 @@ public class IncrementalBackup
      */
     public synchronized void restore(int fullSequence) throws IOException
     {
-        restoreDirectory(backupPath, fullSequence, Integer.MAX_VALUE, directory);
+        restore(fullSequence, Integer.MAX_VALUE, directory);
     }
 
     /**
@@ -95,7 +99,7 @@ public class IncrementalBackup
      */
     public synchronized void restore(Path restorePath, int fullSequence) throws IOException
     {
-        restoreDirectory(backupPath, fullSequence, Integer.MAX_VALUE, restorePath);
+        restore(fullSequence, Integer.MAX_VALUE, restorePath);
     }
 
     /**
@@ -104,7 +108,7 @@ public class IncrementalBackup
      */
     public synchronized void restore(int fullSequence, int incrementalSequence) throws IOException
     {
-        restoreDirectory(backupPath, fullSequence, incrementalSequence, directory);
+        restore(fullSequence, incrementalSequence, directory);
     }
 
     /**
@@ -113,73 +117,29 @@ public class IncrementalBackup
      */
     public synchronized void restore(int fullSequence, int incrementalSequence, Path restorePath) throws IOException
     {
-        restoreDirectory(backupPath, fullSequence, incrementalSequence, restorePath);
+        restoreDirectory(backupPath.resolve(String.valueOf(fullSequence)), fullSequence, incrementalSequence, restorePath);
     }
 
-    private class Pair<X, Y> {
-        public final X x;
-        public final Y y;
-        public Pair(X x, Y y)
-        {
-            this.x = x;
-            this.y = y;
-        }
-    }
-
-    private class Triple<X, Y, Z> {
-        public final X x;
-        public final Y y;
-        public final Z z;
-        public Triple(X x, Y y, Z z)
-        {
-            this.x = x;
-            this.y = y;
-            this.z = z;
-        }
-    }
-
-    /**
-     * Gets original name, full and partial backup version of file
-     * @param file file to get info of
-     * @return Original Name, Full backup number, Partial backup number
-     */
-    private Triple<String, Integer, Integer> getBackupFileDetails(File file)
+    protected void restoreFile(Path restorePath, List<Path> files) throws IOException
     {
-        String fullName = file.getName();
-        String fileName;
-        int major;
-        int minor;
-
-        int lastDot = fullName.lastIndexOf('.');
-        if (fullName.substring(lastDot + 1).equals(removedString))
-        { //expect two more
-            int secondLast = fullName.substring(0, lastDot).lastIndexOf('.');
-            minor = Integer.parseInt(fullName.substring(secondLast+1,lastDot));
-            int thirdLast = fullName.substring(0, secondLast).lastIndexOf('.');
-            major = Integer.parseInt(fullName.substring(thirdLast+1,secondLast));
-            fileName = fullName.substring(0, thirdLast);
-        }
-        else
-        {
-            minor = Integer.parseInt(fullName.substring(lastDot+1));
-            int secondLast = fullName.substring(0, lastDot).lastIndexOf('.');
-            major = Integer.parseInt(fullName.substring(secondLast+1,lastDot));
-            fileName = fullName.substring(0, secondLast);
-        }
-        return new Triple<>(fileName, major, minor);
+        Files.copy(files.get(files.size()-1), restorePath, StandardCopyOption.REPLACE_EXISTING);
     }
 
     /**
      * Recursively restores up a directory
      * @param directory Directory being restored from
      * @param restorePath Directory to copy to
-     * @throws NullPointerException Happens if directory doesn't exist
+     * @throws NullPointerException Thrown if directory doesn't exist
      * @throws IOException Thrown if unable to copy a file
      */
     private void restoreDirectory(Path directory, int fullSequence, int incrementalSequence, Path restorePath) throws NullPointerException, IOException
     {
         Set<Path> directories = new HashSet<>();
-        Map<String, Pair<Integer, File>> files = new HashMap<>();
+        Map<String, List<Pair<BackupPath,Path>>> files = new HashMap<>();
+        Path realPath = getRealPath(directory, fullSequence, restorePath);
+        if (!realPath.toFile().exists() && !realPath.toFile().mkdirs()){
+            throw new IOException("Unable to make "+realPath);
+        }
         for (File file : Objects.requireNonNull(directory.toFile().listFiles()))
         {
             Path path = file.toPath();
@@ -190,35 +150,40 @@ public class IncrementalBackup
             else
             {
                 if (file.getName().equals(protectedFile)) continue;
-                Triple<String, Integer, Integer> details = getBackupFileDetails(file);
-                if (details.y != fullSequence || details.z > incrementalSequence) continue;
-                if (files.containsKey(details.x))
+                BackupPath details;
+                try
                 {
-                    if (files.get(details.x).x < details.z)
-                    {
-                        files.put(details.x, new Pair<>(details.z, file));
-                    }
+                    details = new BackupPath(file.getName());
                 }
-                else
+                catch (NumberFormatException | IndexOutOfBoundsException e)
                 {
-                    files.put(details.x, new Pair<>(details.z, file));
+                    continue;
                 }
+                if (details.getMinorVersion() > incrementalSequence) continue;
+
+                if (!files.containsKey(details.getName()))
+                {
+                    files.put(details.getName(), new ArrayList<>());
+                }
+                files.get(details.getName()).add(new Pair<>(details, file.toPath()));
             }
         }
         for (String name : files.keySet())
         {
-            File file = files.get(name).y;
-            if (file.getName().substring(file.getName().lastIndexOf('.')+1).equals(removedString)) continue;
-
-            Path newFile = restorePath.resolve(backupPath.relativize(directory)+name);
-            if (!Files.exists(newFile.getParent()))
+            files.get(name).sort(Comparator.comparing((pair) -> pair.first().getMinorVersion() - (pair.first().isRemoved() ? 0.5 : 0)));
+            List<Path> toPass = new ArrayList<>();
+            for (Pair<BackupPath, Path> entry : files.get(name))
             {
-                if (!newFile.getParent().toFile().mkdirs())
+                if (entry.first().isRemoved())
                 {
-                    throw new IOException("Unable to create "+newFile.getParent().toString());
+                    toPass.clear();
+                }
+                else
+                {
+                    toPass.add(entry.second());
                 }
             }
-            Files.copy(file.toPath(), newFile, StandardCopyOption.REPLACE_EXISTING);
+            if (toPass.size() > 0) restoreFile(realPath.resolve(name), toPass);
         }
         for (Path subDirectory : directories)
         {
@@ -236,29 +201,38 @@ public class IncrementalBackup
         incrementalBackupSequence = 0;
         Set<Path> newTrackedFiles = Collections.synchronizedSet(new HashSet<>());
         Set<Exception> exceptions = Collections.synchronizedSet(new HashSet<>());
-        backupDirectory(directory, newTrackedFiles, exceptions, true);
+        backupDirectory(directory, newTrackedFiles, exceptions, true, null);
         trackedFiles = newTrackedFiles;
         writeJournal();
     }
 
     /**
      * Performs an incremental backup, copying only files which have changed, incrementing incrementalBackupSequence
-     * @throws IOException Thrown if unable to make a backup file
+     * @throws IOException Thrown if unable to write journal
      */
     public synchronized void performIncrementalBackup() throws IOException
     {
         incrementalBackupSequence++;
         Set<Path> newTrackedFiles = Collections.synchronizedSet(new HashSet<>());
         Set<Exception> exceptions = Collections.synchronizedSet(new HashSet<>());
-        backupDirectory(directory, newTrackedFiles, exceptions, false);
+        backupDirectory(directory, newTrackedFiles, exceptions, false, generateBackupLinks());
         for (Path path : trackedFiles)
         {
             if (!newTrackedFiles.contains(path))
             {
                 //instead of creating an empty file, create a unique marker for a removed file.
                 //Is the distinction ever useful? I don't know, but maybe.
-                if (!getBackupParentPath(path).resolve(path.getFileName()+"."+fullBackupSequence+"."+incrementalBackupSequence+"."+removedString).toFile().createNewFile())
-                    throw new IOException("Unable to create "+getBackupParentPath(path).resolve(path.getFileName()+"."+fullBackupSequence+"."+incrementalBackupSequence+"."+removedString));
+                BackupPath backupPath = new BackupPath(incrementalBackupSequence, path.getFileName().toString(), true);
+                String name = backupPath.toName();
+                try
+                {
+                    if (!getBackupParentPath(path).resolve(name).toFile().createNewFile())
+                        exceptions.add(new IOException("Unable to create "+name));
+                }
+                catch (IOException e)
+                {
+                    exceptions.add(new IOException("Unable to create "+name));
+                }
             }
         }
         trackedFiles = newTrackedFiles;
@@ -281,26 +255,33 @@ public class IncrementalBackup
      * @param isFullBackup Is this a full or incremental backup?
      * @throws NullPointerException Thrown if directory doesn't exist
      */
-    private void backupDirectory(Path directory, Set<Path> trackedFiles, Set<Exception> failures, boolean isFullBackup) throws NullPointerException
+    private void backupDirectory(Path directory, Set<Path> trackedFiles, Set<Exception> failures, boolean isFullBackup, Map<Path, List<Path>> links) throws NullPointerException
     {
+        Path backupDir = getBackupPath(directory);
+        if (!Files.exists(backupDir) && !backupDir.toFile().mkdirs())
+        {
+            failures.add(new IOException("Unable to create "+backupDir));
+            return;
+        }
         for (File file : Objects.requireNonNull(directory.toFile().listFiles()))
         {
             Path path = file.toPath();
             if (file.isDirectory())
             {
-                backupDirectory(path, trackedFiles, failures, isFullBackup);
+                backupDirectory(path, trackedFiles, failures, isFullBackup, links);
             }
             else
             {
                 try
                 {
+                    BackupPath backupName = new BackupPath(incrementalBackupSequence, path.getFileName().toString(), false);
                     if (isFullBackup)
                     {
-                        copyFile(path);
+                        copyFile(path, backupDir, backupName);
                     }
                     else
                     {
-                        backupFile(path);
+                        backupFile(backupDir, backupName, path, links.get(path));
                     }
                     trackedFiles.add(path);
                 }
@@ -317,12 +298,11 @@ public class IncrementalBackup
      * @param file File to backup
      * @throws IOException Thrown if unable to make backup file
      */
-    protected void backupFile(Path file) throws IOException
+    protected void backupFile(Path backupLocation, BackupPath name, Path file, List<Path> links) throws IOException
     {
-        File backup = getLatestBackup(file);
-        if (hasChanged(backup, file.toFile()))
+        if (hasChanged(links, file.toFile()))
         { //we need to save
-            copyFile(file);
+            copyFile(file, backupLocation, name);
         }
     }
 
@@ -331,18 +311,9 @@ public class IncrementalBackup
      * @param file File to backup
      * @throws IOException Thrown if unable to make backup file
      */
-    private void copyFile(Path file) throws IOException
+    private void copyFile(Path file, Path newLocation, BackupPath name) throws IOException
     {
-        Path parentDirectory = getBackupParentPath(file);
-        Path newFile = parentDirectory.resolve(file.getFileName()+"."+fullBackupSequence+"."+incrementalBackupSequence);
-        if (!Files.exists(parentDirectory))
-        {
-            if (!parentDirectory.toFile().mkdirs())
-            {
-                throw new IOException("Unable to create "+parentDirectory);
-            }
-        }
-        Files.copy(file, newFile, StandardCopyOption.REPLACE_EXISTING);
+        Files.copy(file, newLocation.resolve(name.toName()), StandardCopyOption.REPLACE_EXISTING);
     }
 
     /**
@@ -352,20 +323,7 @@ public class IncrementalBackup
      */
     private File getLatestBackup(Path path)
     {
-        File[] backups = getBackupsFromPath(path);
-        File latest = null;
-        int bestNumber = -1;
-        for (File file : backups)
-        {
-            int index = file.getName().lastIndexOf('.');
-            int incSequenceNumber = Integer.parseInt(file.getName().substring(index + 1));
-            if (incSequenceNumber > bestNumber)
-            {
-                bestNumber = incSequenceNumber;
-                latest = file;
-            }
-        }
-        return latest;
+        return getLatestBackup(path, fullBackupSequence, Integer.MAX_VALUE);
     }
 
     /**
@@ -376,20 +334,7 @@ public class IncrementalBackup
      */
     private File getLatestBackup(Path path, int maxFull)
     {
-        File[] backups = getBackupsFromPath(path, maxFull);
-        File latest = null;
-        int bestNumber = -1;
-        for (File file : backups)
-        {
-            int index = file.getName().lastIndexOf('.');
-            int incSequenceNumber = Integer.parseInt(file.getName().substring(index + 1));
-            if (incSequenceNumber > bestNumber)
-            {
-                bestNumber = incSequenceNumber;
-                latest = file;
-            }
-        }
-        return latest;
+        return getLatestBackup(path, maxFull, Integer.MAX_VALUE);
     }
 
     /**
@@ -423,8 +368,94 @@ public class IncrementalBackup
      * @return parent directory of path in backupPath
      */
     private Path getBackupParentPath(Path path)
+    { // backupPath/fullBackupSequence/path
+        return getBackupParentPath(path, fullBackupSequence);
+    }
+
+    /**
+     * Obtains the parent directory of the file in the backup directory, for the fullBackupSequence-th full backup
+     * @param path path to file
+     * @return parent directory of path in backupPath
+     */
+    private Path getBackupParentPath(Path path, int fullBackupSequence)
+    { // backupPath/fullBackupSequence/path
+        return getBackupPath(path.getParent(), fullBackupSequence);
+    }
+
+    private Path getBackupPath(Path path)
     {
-        return backupPath.resolve(directory.relativize(path.getParent()));
+        return getBackupPath(path, fullBackupSequence);
+    }
+
+    private Path getBackupPath(Path path, int fullBackupSequence)
+    {
+        return backupPath.resolve(String.valueOf(fullBackupSequence)).resolve(directory.relativize(path));
+    }
+
+    private Map<Path, List<Path>> generateBackupLinks()
+    {
+        Map<Path, List<Pair<BackupPath, Path>>> unordered = generateBackupLinks(fullBackupSequence);
+        Map<Path, List<Path>> sorted = new HashMap<>();
+        for (Path path : unordered.keySet())
+        {
+            List<Pair<BackupPath, Path>> files = unordered.get(path);
+            files.sort(Comparator.comparing((pair) -> pair.first().getMinorVersion() - (pair.first().isRemoved() ? 0.5 : 0)));
+            List<Path> toPass = new ArrayList<>();
+            for (Pair<BackupPath, Path> entry : files)
+            {
+                if (entry.first().isRemoved())
+                {
+                    toPass.clear();
+                }
+                else
+                {
+                    toPass.add(entry.second());
+                }
+            }
+            sorted.put(path, toPass);
+        }
+        return sorted;
+    }
+
+    private Map<Path, List<Pair<BackupPath, Path>>> generateBackupLinks(int fullBackupSequence)
+    {
+        Map<Path, List<Pair<BackupPath, Path>>> toReturn = new HashMap<>();
+        addBackupLinks(backupPath.resolve(String.valueOf(fullBackupSequence)), toReturn);
+        return toReturn;
+    }
+
+    private Path getRealPath(Path dir, int fullBackupSequence)
+    {
+        return getRealPath(dir, fullBackupSequence, directory);
+    }
+
+    private Path getRealPath(Path dir, int fullBackupSequence, Path mainDir)
+    {
+        Path relDir = backupPath.resolve(String.valueOf(fullBackupSequence)).relativize(dir);
+        return mainDir.resolve(relDir);
+    }
+
+    private void addBackupLinks(Path dir, Map<Path, List<Pair<BackupPath, Path>>> links)
+    {
+        Path realDir = getRealPath(dir, fullBackupSequence);
+        for (File file : Objects.requireNonNull(dir.toFile().listFiles()))
+        {
+            if (file.isDirectory())
+            {
+                addBackupLinks(file.toPath(), links);
+            }
+            else
+            {
+                BackupPath details = new BackupPath(file.getName());
+                if (details.getMinorVersion() >= incrementalBackupSequence) continue;
+                Path filePath = realDir.resolve(details.getName());
+                if (!links.containsKey(filePath))
+                {
+                    links.put(filePath, new ArrayList<>());
+                }
+                links.get(filePath).add(new Pair<>(details, file.toPath()));
+            }
+        }
     }
 
     /**
@@ -434,34 +465,33 @@ public class IncrementalBackup
      */
     private File[] getBackupsFromPath(Path path)
     {
-        Path parentPath = getBackupParentPath(path);
-        String fileName = path.getFileName().toString();
-        return parentPath.toFile().listFiles((dir, name) -> name.matches(Pattern.quote(fileName + "." + fullBackupSequence + ".") + "[0-9]+"));
+        return getBackupsFromPath(path, fullBackupSequence);
     }
 
     /**
-     * Returns all backup copies since the maxFull full backup for a given file
+     * Returns all backup copies since the maxFull-th full backup for a given file
      * @param path path to file
      * @param maxFull full backup to use
      * @return Array containing all relevant backup files
      */
     private File[] getBackupsFromPath(Path path, int maxFull)
     {
-        Path parentPath = getBackupParentPath(path);
+        Path parentPath = getBackupParentPath(path, maxFull);
         String fileName = path.getFileName().toString();
-        return parentPath.toFile().listFiles((dir, name) -> name.matches(Pattern.quote(fileName + "." + maxFull + ".") + "[0-9]+"));
+        return parentPath.toFile().listFiles((dir, name) -> name.matches("[0-9]+\\.r?\\."+Pattern.quote(fileName)));
     }
 
     /**
      * Compares two versions of a file to see whether there has been any changes
-     * @param oldFile The old copy of the file
+     * @param oldFiles The collection of backups for the file
      * @param newFile The new copy of the file
      * @return True if different (or unable to read oldFile), False if not
      * @throws IOException Thrown if unable to read newfile
      */
-
-    protected static boolean hasChanged(File oldFile, File newFile) throws IOException
+    protected boolean hasChanged(List<Path> oldFiles, File newFile) throws IOException
     {
+        if (oldFiles == null || oldFiles.size() == 0) return true;
+        File oldFile = oldFiles.get(oldFiles.size()-1).toFile();
         byte[] oldHash;
         try
         {
@@ -472,6 +502,15 @@ public class IncrementalBackup
             return true;
         }
         byte[] newHash = generateMD5(Files.readAllBytes(newFile.toPath()));
+        return !Arrays.equals(oldHash, newHash);
+    }
+
+    protected boolean isDifferent(byte[] oldData, byte[] newData)
+    {
+        if (oldData == null && newData == null) return false;
+        if (oldData == null || newData == null) return true;
+        byte[] oldHash = generateMD5(oldData);
+        byte[] newHash = generateMD5(newData);
         return !Arrays.equals(oldHash, newHash);
     }
 
