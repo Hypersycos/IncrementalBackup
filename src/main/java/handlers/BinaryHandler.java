@@ -133,6 +133,19 @@ public class BinaryHandler extends ITypeHandler
     }
 
     @Override
+    public CompressionScheme getInitCompression(byte[] data)
+    {
+        if (data.length >= compression_threshold)
+        {
+            return new ZipScheme();
+        }
+        else
+        {
+            return new NoCompress();
+        }
+    }
+
+    @Override
     public Set<CompressionScheme> getCompressionSchemes()
     {
         return Set.of(new ZipScheme(), new NoCompress());

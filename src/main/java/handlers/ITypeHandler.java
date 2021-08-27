@@ -30,7 +30,8 @@ public abstract class ITypeHandler
     public byte[] combineAll(List<Path> files) throws IOException
     {
         if (files == null || files.size() == 0) return null;
-        byte[] initData = Files.readAllBytes(files.get(0));
+        BackupPath initMeta = new BackupPath(files.get(0).getFileName().toString());
+        byte[] initData = initMeta.getCompression().decompress(Files.readAllBytes(files.get(0)));
         if (files.size() == 1) return initData;
 
         ByteBuffer buffer = ByteBuffer.allocate(getInitBufferSize(initData.length));
@@ -53,6 +54,7 @@ public abstract class ITypeHandler
      * @return returns the difference, to be used in combine when restoring, and the compression scheme to use to store
      */
     public abstract Pair<byte[], CompressionScheme> getDifference(byte[] oldData, byte[] newData);
+    public abstract CompressionScheme getInitCompression(byte[] data);
     public abstract Set<CompressionScheme> getCompressionSchemes();
 
     protected static ByteBuffer extend(ByteBuffer old)

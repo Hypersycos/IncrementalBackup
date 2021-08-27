@@ -2,6 +2,8 @@ package compression;
 
 import util.AlphaNumericString;
 
+import java.io.IOException;
+
 public abstract class CompressionScheme
 {
     /**
@@ -10,8 +12,8 @@ public abstract class CompressionScheme
     public abstract AlphaNumericString getId();
     public abstract AlphaNumericString generateFlags();
     public abstract void consumeFlags();
-    public abstract byte[] compress(byte[] data);
-    public abstract byte[] decompress(byte[] data);
+    public abstract byte[] compress(byte[] data) throws IOException;
+    public abstract byte[] decompress(byte[] data) throws IOException;
 
     @Override
     public boolean equals(Object obj)

@@ -2,6 +2,13 @@ package compression;
 
 import util.AlphaNumericString;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
+
 public class ZipScheme extends CompressionScheme
 {
     AlphaNumericString id = new AlphaNumericString("z");
@@ -24,14 +31,27 @@ public class ZipScheme extends CompressionScheme
     }
 
     @Override
-    public byte[] compress(byte[] data)
+    public byte[] compress(byte[] data) throws IOException
     {
-        return data;
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try(ZipOutputStream zos = new ZipOutputStream(baos))
+        {
+            ZipEntry entry = new ZipEntry("data");
+            zos.putNextEntry(entry);
+            zos.write(data);
+            zos.closeEntry();
+        }
+        return baos.toByteArray();
     }
 
     @Override
-    public byte[] decompress(byte[] data)
+    public byte[] decompress(byte[] data) throws IOException
     {
-        return data;
+        ByteArrayInputStream bais = new ByteArrayInputStream(data);
+        try(ZipInputStream zis = new ZipInputStream(bais))
+        {
+            zis.getNextEntry();
+            return zis.readAllBytes();
+        }
     }
 }

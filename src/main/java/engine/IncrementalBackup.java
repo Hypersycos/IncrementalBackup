@@ -277,7 +277,7 @@ public class IncrementalBackup
                     BackupPath backupName = new BackupPath(incrementalBackupSequence, path.getFileName().toString(), false);
                     if (isFullBackup)
                     {
-                        copyFile(path, backupDir, backupName);
+                        backupFile(backupDir, backupName, path, null);
                     }
                     else
                     {
@@ -483,7 +483,7 @@ public class IncrementalBackup
 
     /**
      * Compares two versions of a file to see whether there has been any changes
-     * @param oldFiles The collection of backups for the file
+     * @param oldFiles The collection of backups for the file. May be null or have length 0.
      * @param newFile The new copy of the file
      * @return True if different (or unable to read oldFile), False if not
      * @throws IOException Thrown if unable to read newfile

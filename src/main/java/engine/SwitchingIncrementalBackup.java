@@ -74,7 +74,8 @@ public class SwitchingIncrementalBackup extends IncrementalBackup
             byte[] newData = Files.readAllBytes(file);
             if (links == null || links.size() == 0)
             {
-                Files.write(backupPath, newData);
+                name.setCompression(handler.getInitCompression(newData));
+                Files.write(backupPath.resolve(name.toName()), name.getCompression().compress(newData));
             }
             else
             {
@@ -82,7 +83,7 @@ public class SwitchingIncrementalBackup extends IncrementalBackup
                 if (super.isDifferent(oldData, newData))
                 {
                     Pair<byte[], CompressionScheme> data = handler.getDifference(oldData, newData);
-                    if (data != null)
+                    if (data != null && data.first().length > 0)
                     {
                         name.setCompression(data.second());
                         Files.write(backupPath.resolve(name.toName()), data.second().compress(data.first()));
