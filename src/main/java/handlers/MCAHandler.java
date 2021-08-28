@@ -6,14 +6,15 @@ import compression.ZipScheme;
 import util.Pair;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.zip.ZipInputStream;
+import java.util.zip.*;
 
 public class MCAHandler extends ITypeHandler
 {
-    BinaryHandler binaryHandler = new BinaryHandler();
+    BinaryHandler binaryHandler = new BinaryHandler(16, 1024);
 
     record ChunkLocation(int offset, byte sectorCount){
         @Override
@@ -50,11 +51,12 @@ public class MCAHandler extends ITypeHandler
             int timestamp = newBuffer.getInt();
             if (timestamp == oldHeader.second()[i])
             {
-                Pair<Integer, byte[]> chunk = getChunk(i, oldHeader, oldData);
+                Pair<Pair<Integer, Byte>, byte[]> chunk = getChunk(i, oldHeader, oldData);
                 if (locationData.sectorCount > 0)
                 {
-                    swap.putInt(locationData.offset * 4096, chunk.first());
-                    swap.put(locationData.offset * 4096 + 4, chunk.second());
+                    swap.putInt(locationData.offset * 4096, chunk.first().first());
+                    swap.put(locationData.offset * 4096 + 4, chunk.first().second());
+                    swap.put(locationData.offset * 4096 + 5, chunk.second());
                     int chunk_end = locationData.offset + locationData.sectorCount;
                     if (chunk_end > end)
                     {
@@ -65,14 +67,26 @@ public class MCAHandler extends ITypeHandler
             else if (locationData.sectorCount() > 0)
             {
                 int chunk_length_bytes = newBuffer.getInt();
-                byte[] old_chunk = getChunk(i, oldHeader, oldData).second();
-                ByteBuffer temp = ByteBuffer.allocate(1024 * 1024 + 4); //chunk can't be bigger than 1MiB
-                temp.put(old_chunk);
-                byte[] diff = new byte[chunk_length_bytes];
-                newBuffer.get(diff, 0, chunk_length_bytes);
-                byte[] newChunk = bufferToTrimmedArray(binaryHandler.combine(temp, diff));
-                swap.putInt(locationData.offset * 4096, newChunk.length);
-                swap.put(locationData.offset * 4096 + 4, newChunk);
+                byte decompressionType = newBuffer.get();
+                byte[] newChunk;
+                if (oldHeader.first()[i].sectorCount == 0)
+                {
+                    newChunk = new byte[chunk_length_bytes];
+                    newBuffer.get(newChunk, 0, chunk_length_bytes);
+                }
+                else
+                {
+                    Pair<Pair<Integer, Byte>, byte[]> chunkData = getChunk(i, oldHeader, oldData);
+                    byte[] old_chunk = decompressChunk(chunkData.second(), chunkData.first().second());
+                    ByteBuffer temp = ByteBuffer.allocate(1024 * 1024 + 4); //chunk can't be bigger than 1MiB
+                    temp.put(old_chunk);
+                    byte[] diff = new byte[chunk_length_bytes];
+                    newBuffer.get(diff, 0, chunk_length_bytes);
+                    newChunk = compressChunk(bufferToTrimmedArray(binaryHandler.combine(temp, diff)), decompressionType);
+                }
+                swap.putInt(locationData.offset * 4096, newChunk.length+1);
+                swap.put(locationData.offset * 4096 + 4, decompressionType);
+                swap.put(locationData.offset * 4096 + 5, newChunk);
                 int chunk_end = locationData.offset + locationData.sectorCount;
                 if (chunk_end > end)
                 {
@@ -94,9 +108,10 @@ public class MCAHandler extends ITypeHandler
             swap.putInt(i*4+4096, oldData.getInt(i*4+4096)); //timestamp
             if (locationData != 0)
             {
-                Pair<Integer, byte[]> chunk = getChunk(i, oldHeader, oldData);
-                swap.putInt(oldHeader.first()[i].offset * 4096, chunk.first());
-                swap.put(oldHeader.first()[i].offset * 4096 + 4, chunk.second());
+                Pair<Pair<Integer, Byte>, byte[]> chunk = getChunk(i, oldHeader, oldData);
+                swap.putInt(oldHeader.first()[i].offset * 4096, chunk.first().first());
+                swap.put(oldHeader.first()[i].offset * 4096 + 4, chunk.first().second());
+                swap.put(oldHeader.first()[i].offset * 4096 + 5, chunk.second());
                 int chunk_end = oldHeader.first()[i].offset + oldHeader.first()[i].sectorCount;
                 if (chunk_end > end)
                 {
@@ -146,14 +161,19 @@ public class MCAHandler extends ITypeHandler
         return new Pair<>(getLocations(buffer), getTimeStamps(buffer));
     }
 
-    private Pair<Integer, byte[]> getChunk(int i, Pair<ChunkLocation[], int[]> header, ByteBuffer buffer)
+    private Pair<Pair<Integer, Byte>, byte[]> getChunk(int i, Pair<ChunkLocation[], int[]> header, ByteBuffer buffer)
     {
         buffer.position(0);
         int offset = header.first()[i].offset * 4096;
+        if (offset < 8192)
+        {
+            return new Pair<>(new Pair<>(0, (byte)0), null);
+        }
         int length = buffer.getInt(offset);
-        byte[] data = new byte[length];
-        buffer.get(offset+4, data, 0, length);
-        return new Pair<>(length, data);
+        byte decompressionType = buffer.get(offset+4);
+        byte[] data = new byte[length-1];
+        buffer.get(offset+5, data, 0, length-1);
+        return new Pair<>(new Pair<>(length, decompressionType), data);
     }
 
     @Override
@@ -161,7 +181,7 @@ public class MCAHandler extends ITypeHandler
     {
         ByteBuffer oldBuffer = ByteBuffer.wrap(oldData);
         ByteBuffer newBuffer = ByteBuffer.wrap(newData);
-        ByteBuffer diffs = ByteBuffer.allocate(Math.max(newData.length, oldData.length)*2);
+        ByteBuffer diffs = ByteBuffer.allocate(Math.max(newData.length, oldData.length)*5);
         Pair<ChunkLocation[], int[]> oldHeader = getHeader(oldBuffer);
         Pair<ChunkLocation[], int[]> newHeader = getHeader(newBuffer);
         for (int i = 0; i < 1024; i++)
@@ -174,17 +194,27 @@ public class MCAHandler extends ITypeHandler
                 diffs.putInt(newHeader.second()[i]);
                 if (newHeader.first()[i].sectorCount != 0 && oldHeader.second()[i] != newHeader.second()[i])
                 {
-                    Pair<Integer, byte[]> oldChunk = getChunk(i, oldHeader, oldBuffer);
-                    Pair<Integer, byte[]> newChunk = getChunk(i, newHeader, newBuffer);
-                    byte[] chunk_diff = binaryHandler.getDifference(oldChunk.second(), newChunk.second()).first();
+                    Pair<Pair<Integer, Byte>, byte[]> oldChunk = getChunk(i, oldHeader, oldBuffer);
+                    Pair<Pair<Integer, Byte>, byte[]> newChunk = getChunk(i, newHeader, newBuffer);
+                    byte[] chunk_diff;
+                    if (oldChunk.second() == null)
+                    {
+                        chunk_diff = newChunk.second();
+                    }
+                    else
+                    {
+                        chunk_diff = binaryHandler.getDifference(decompressChunk(oldChunk.second(), oldChunk.first().second()),
+                                                                        decompressChunk(newChunk.second(), newChunk.first().second())).first();
+                    }
                     diffs.putInt(chunk_diff.length);
+                    diffs.put(newChunk.first().second());
                     diffs.put(chunk_diff);
                 }
             }
         }
         //chunk data is already compressed, and so doesn't compress well.
-        return new Pair<>(bufferToTrimmedArray(diffs), new NoCompress());
-        /*byte[] toReturn = bufferToTrimmedArray(diffs);
+        //return new Pair<>(bufferToTrimmedArray(diffs), new NoCompress());
+        byte[] toReturn = bufferToTrimmedArray(diffs);
         //we compress above 1KiB
         if (toReturn.length >= binaryHandler.compression_threshold)
         {
@@ -193,7 +223,7 @@ public class MCAHandler extends ITypeHandler
         else
         {
             return new Pair<>(toReturn, new NoCompress());
-        }*/
+        }
     }
 
     @Override
@@ -211,6 +241,8 @@ public class MCAHandler extends ITypeHandler
     private byte[] decompressChunk(byte[] chunk, byte decompressionType)
     {
         //1 == gzip, 2 == zlib, 3 == uncompressed
+        if (chunk == null)
+            return new byte[0];
         if (decompressionType == 1)
         {
             throw new IllegalArgumentException("Gzipped chunk");
@@ -218,17 +250,43 @@ public class MCAHandler extends ITypeHandler
         else if (decompressionType == 2)
         {
             ByteArrayInputStream bais = new ByteArrayInputStream(chunk);
-            try (ZipInputStream zis = new ZipInputStream(bais))
+            try(InflaterInputStream zis = new InflaterInputStream(bais))
             {
-                zis.getNextEntry();
                 return zis.readAllBytes();
             }
             catch (IOException e)
             {
-                e.printStackTrace();
+                throw new AssertionError("IOException shouldn't occur");
             }
         }
         else if (decompressionType == 3)
+        {
+            return chunk;
+        }
+        throw new IllegalArgumentException("Unknown decompression type");
+    }
+
+    private byte[] compressChunk(byte[] chunk, byte compressionType)
+    {
+        //1 == gzip, 2 == zlib, 3 == uncompressed
+        if (compressionType == 1)
+        {
+            throw new IllegalArgumentException("Gzipped chunk");
+        }
+        else if (compressionType == 2)
+        {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try(DeflaterOutputStream dos = new DeflaterOutputStream(baos))
+            {
+                dos.write(chunk);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError("IOException shouldn't occur");
+            }
+            return baos.toByteArray();
+        }
+        else if (compressionType == 3)
         {
             return chunk;
         }

@@ -29,9 +29,11 @@ public class CommandLineTest
             {
                 System.out.println("dirname");
                 Path restoreDir = directory.resolveSibling(reader.readLine());
+                System.out.println("full");
+                int majorVer = Integer.parseInt(reader.readLine());
                 System.out.println("inc");
                 int minorVer = Integer.parseInt(reader.readLine());
-                backup.restore(1, minorVer, restoreDir);
+                backup.restore(majorVer, minorVer, restoreDir);
             }
             System.out.print("Command: ");
         }
