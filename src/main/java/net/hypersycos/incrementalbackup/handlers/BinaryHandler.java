@@ -1,9 +1,9 @@
-package handlers;
+package net.hypersycos.incrementalbackup.handlers;
 
-import compression.CompressionScheme;
-import compression.NoCompress;
-import compression.ZipScheme;
-import util.Pair;
+import net.hypersycos.incrementalbackup.compression.CompressionScheme;
+import net.hypersycos.incrementalbackup.compression.NoCompress;
+import net.hypersycos.incrementalbackup.compression.ZipScheme;
+import net.hypersycos.incrementalbackup.util.Pair;
 
 import java.nio.ByteBuffer;
 import java.util.Set;
@@ -47,9 +47,21 @@ public class BinaryHandler extends ITypeHandler
                 block_id += Byte.toUnsignedInt(newBuffer.get()) << 8*(id_length-i-1);
             }
 
-            if (block_id >= length) length = block_id+1;
-
             int my_block_size = Math.min(newBuffer.remaining(), block_size);
+            if (block_id >= length)
+            {
+                length = block_id+1;
+            }
+
+            if (length * block_size > oldData.capacity())
+            {
+                ByteBuffer temp = ByteBuffer.allocate(oldData.capacity() * 2);
+                oldData.position(Math.min(length * block_size, oldData.capacity()));
+                oldData.flip();
+                temp.put(oldData);
+                oldData = temp;
+            }
+
             byte[] block = new byte[my_block_size];
             newBuffer.get(block, 0, my_block_size);
             oldData.put(block_id*block_size, block);

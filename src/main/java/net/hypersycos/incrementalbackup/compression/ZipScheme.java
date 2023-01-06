@@ -1,6 +1,6 @@
-package compression;
+package net.hypersycos.incrementalbackup.compression;
 
-import util.AlphaNumericString;
+import net.hypersycos.incrementalbackup.util.AlphaNumericString;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

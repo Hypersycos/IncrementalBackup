@@ -1,4 +1,4 @@
-package util;
+package net.hypersycos.incrementalbackup.util;
 
 import java.util.Objects;
 

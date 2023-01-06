@@ -1,13 +1,13 @@
-package compression;
+package net.hypersycos.incrementalbackup.compression;
 
-import util.AlphaNumericString;
+import net.hypersycos.incrementalbackup.util.AlphaNumericString;
 
 import java.io.IOException;
 
 public abstract class CompressionScheme
 {
     /**
-     * Returns the unique id of the compression scheme
+     * Returns the unique id of the net.hypersycos.incrementalbackup.compression scheme
      */
     public abstract AlphaNumericString getId();
     public abstract AlphaNumericString generateFlags();

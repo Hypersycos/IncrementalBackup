@@ -1,14 +1,14 @@
-package handlers;
+package net.hypersycos.incrementalbackup.handlers;
 
-import compression.CompressionScheme;
-import engine.BackupPath;
-import org.jetbrains.annotations.NotNull;
-import util.Pair;
+import net.hypersycos.incrementalbackup.compression.CompressionScheme;
+import net.hypersycos.incrementalbackup.engine.BackupPath;
+import net.hypersycos.incrementalbackup.util.Pair;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -47,11 +47,27 @@ public abstract class ITypeHandler
         return toReturn;
     }
 
+    public boolean verify(byte[] oldData, byte[] diff, byte[] newData)
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(getInitBufferSize(oldData.length));
+        buffer.put(oldData);
+        ByteBuffer combined = combine(buffer, diff);
+        return this.verify(combined, ByteBuffer.wrap(newData));
+    }
+
+    protected boolean verify(ByteBuffer combined, ByteBuffer newData)
+    {
+        combined.flip();
+        byte[] test = new byte[combined.limit()];
+        combined.get(test, 0, combined.limit());
+        return Arrays.equals(test, newData.array());
+    }
+
     /**
      * getDifference returns the data to be written to a file, representing the additions of newData to oldData
      * @param oldData old copy of file in byte array. Cannot be null.
      * @param newData new copy of file in byte array
-     * @return returns the difference, to be used in combine when restoring, and the compression scheme to use to store
+     * @return returns the difference, to be used in combine when restoring, and the net.hypersycos.incrementalbackup.compression scheme to use to store
      */
     public abstract Pair<byte[], CompressionScheme> getDifference(byte[] oldData, byte[] newData);
     public abstract CompressionScheme getInitCompression(byte[] data);

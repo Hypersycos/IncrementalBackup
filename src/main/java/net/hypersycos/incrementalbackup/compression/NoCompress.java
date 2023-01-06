@@ -1,6 +1,6 @@
-package compression;
+package net.hypersycos.incrementalbackup.compression;
 
-import util.AlphaNumericString;
+import net.hypersycos.incrementalbackup.util.AlphaNumericString;
 
 public class NoCompress extends CompressionScheme
 {

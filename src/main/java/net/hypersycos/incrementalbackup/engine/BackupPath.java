@@ -1,9 +1,7 @@
-package engine;
+package net.hypersycos.incrementalbackup.engine;
 
-import compression.CompressionScheme;
-import compression.NoCompress;
-
-import java.nio.file.Path;
+import net.hypersycos.incrementalbackup.compression.CompressionScheme;
+import net.hypersycos.incrementalbackup.compression.NoCompress;
 
 public class BackupPath
 {

@@ -1,9 +1,9 @@
-package engine;
+package net.hypersycos.incrementalbackup.engine;
 
-import compression.CompressionScheme;
-import handlers.BinaryHandler;
-import handlers.ITypeHandler;
-import util.Pair;
+import net.hypersycos.incrementalbackup.compression.CompressionScheme;
+import net.hypersycos.incrementalbackup.handlers.BinaryHandler;
+import net.hypersycos.incrementalbackup.handlers.ITypeHandler;
+import net.hypersycos.incrementalbackup.util.Pair;
 
 import java.io.File;
 import java.io.IOException;
@@ -20,6 +20,8 @@ public class SwitchingIncrementalBackup extends IncrementalBackup
     {
         super(directory, backupPath);
     }
+
+    public SwitchingIncrementalBackup(Path directory, Path backupPath, Set<Path> ignores) { super(directory, backupPath, ignores);}
 
     public void register(ITypeHandler handler, String... types)
     {
@@ -85,6 +87,12 @@ public class SwitchingIncrementalBackup extends IncrementalBackup
                     Pair<byte[], CompressionScheme> data = handler.getDifference(oldData, newData);
                     if (data != null && data.first().length > 0)
                     {
+                        if (!handler.verify(oldData, data.first(), newData))
+                        {
+                            System.out.println("Verification failed for "+file.toString());
+                            throw new IOException("Backup isn't equivalent to new file: "+file.toString());
+                        }
+
                         name.setCompression(data.second());
                         Files.write(backupPath.resolve(name.toName()), data.second().compress(data.first()));
                     }

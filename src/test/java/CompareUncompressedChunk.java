@@ -1,8 +1,8 @@
-import compression.CompressionScheme;
-import engine.SwitchingIncrementalBackup;
-import handlers.BinaryHandler;
-import handlers.MCAHandler;
-import util.Pair;
+import net.hypersycos.incrementalbackup.compression.CompressionScheme;
+import net.hypersycos.incrementalbackup.engine.SwitchingIncrementalBackup;
+import net.hypersycos.incrementalbackup.handlers.BinaryHandler;
+import net.hypersycos.incrementalbackup.handlers.MCAHandler;
+import net.hypersycos.incrementalbackup.util.Pair;
 
 import java.io.BufferedReader;
 import java.io.IOException;

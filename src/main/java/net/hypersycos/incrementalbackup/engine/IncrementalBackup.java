@@ -1,6 +1,6 @@
-package engine;
+package net.hypersycos.incrementalbackup.engine;
 
-import util.Pair;
+import net.hypersycos.incrementalbackup.util.Pair;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -21,11 +21,20 @@ public class IncrementalBackup
     private int incrementalBackupSequence = 0;
     private final Path directory;
     private Set<Path> trackedFiles = new HashSet<>();
+    private Set<Path> ignoredPaths;
 
     public IncrementalBackup(Path directory, Path backupPath)
     {
+        this(directory, backupPath, new HashSet<>());
+    }
+
+    public IncrementalBackup(Path directory, Path backupPath, Set<Path> ignores)
+    {
         this.backupPath = backupPath;
         this.directory = directory;
+        ignores.add(backupPath);
+        this.ignoredPaths = ignores;
+
         File journal = backupPath.resolve(protectedFile).toFile();
         try (Scanner journalScanner = new Scanner(journal))
         {
@@ -41,7 +50,6 @@ public class IncrementalBackup
             //TODO: search for highest numbers
             //TODO: get tracked files
         }
-
     }
 
     /**
@@ -197,13 +205,24 @@ public class IncrementalBackup
      */
     public synchronized void performFullBackup() throws IOException
     {
-        fullBackupSequence++;
-        incrementalBackupSequence = 0;
         Set<Path> newTrackedFiles = Collections.synchronizedSet(new HashSet<>());
         Set<Exception> exceptions = Collections.synchronizedSet(new HashSet<>());
         backupDirectory(directory, newTrackedFiles, exceptions, true, null);
         trackedFiles = newTrackedFiles;
-        writeJournal();
+
+        fullBackupSequence++;
+        int temp = incrementalBackupSequence;
+        incrementalBackupSequence = 0;
+        try
+        {
+            writeJournal();
+        }
+        catch (IOException e)
+        {
+            incrementalBackupSequence = temp;
+            fullBackupSequence--;
+            throw e;
+        }
     }
 
     /**
@@ -212,7 +231,6 @@ public class IncrementalBackup
      */
     public synchronized void performIncrementalBackup() throws IOException
     {
-        incrementalBackupSequence++;
         Set<Path> newTrackedFiles = Collections.synchronizedSet(new HashSet<>());
         Set<Exception> exceptions = Collections.synchronizedSet(new HashSet<>());
         backupDirectory(directory, newTrackedFiles, exceptions, false, generateBackupLinks());
@@ -244,7 +262,17 @@ public class IncrementalBackup
                 System.err.println(e.toString());
             }
         }
-        writeJournal();
+
+        incrementalBackupSequence++;
+        try
+        {
+            writeJournal();
+        }
+        catch (IOException e)
+        {
+            incrementalBackupSequence--;
+            throw e;
+        }
     }
 
     /**
@@ -266,6 +294,25 @@ public class IncrementalBackup
         for (File file : Objects.requireNonNull(directory.toFile().listFiles()))
         {
             Path path = file.toPath();
+            try
+            {
+                boolean isIgnored = false;
+                for (Path ignoredPath : ignoredPaths)
+                {
+                    if (Files.isSameFile(ignoredPath, path))
+                    {
+                        isIgnored = true;
+                        break;
+                    }
+                }
+                if (isIgnored) continue;
+            }
+            catch (IOException e)
+            {
+                failures.add(e);
+                continue;
+            }
+
             if (file.isDirectory())
             {
                 backupDirectory(path, trackedFiles, failures, isFullBackup, links);
@@ -420,7 +467,11 @@ public class IncrementalBackup
     private Map<Path, List<Pair<BackupPath, Path>>> generateBackupLinks(int fullBackupSequence)
     {
         Map<Path, List<Pair<BackupPath, Path>>> toReturn = new HashMap<>();
-        addBackupLinks(backupPath.resolve(String.valueOf(fullBackupSequence)), toReturn);
+        Path dir = backupPath.resolve(String.valueOf(fullBackupSequence));
+        if (dir.toFile().exists())
+        {
+            addBackupLinks(backupPath.resolve(String.valueOf(fullBackupSequence)), toReturn);
+        }
         return toReturn;
     }
 
@@ -509,9 +560,9 @@ public class IncrementalBackup
     {
         if (oldData == null && newData == null) return false;
         if (oldData == null || newData == null) return true;
-        byte[] oldHash = generateMD5(oldData);
-        byte[] newHash = generateMD5(newData);
-        return !Arrays.equals(oldHash, newHash);
+        //byte[] oldHash = generateMD5(oldData);
+        //byte[] newHash = generateMD5(newData);
+        return !Arrays.equals(oldData, newData);
     }
 
     /**

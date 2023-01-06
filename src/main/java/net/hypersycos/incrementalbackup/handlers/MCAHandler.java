@@ -1,9 +1,9 @@
-package handlers;
+package net.hypersycos.incrementalbackup.handlers;
 
-import compression.CompressionScheme;
-import compression.NoCompress;
-import compression.ZipScheme;
-import util.Pair;
+import net.hypersycos.incrementalbackup.compression.CompressionScheme;
+import net.hypersycos.incrementalbackup.compression.NoCompress;
+import net.hypersycos.incrementalbackup.compression.ZipScheme;
+import net.hypersycos.incrementalbackup.util.Pair;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -76,13 +76,15 @@ public class MCAHandler extends ITypeHandler
                 }
                 else
                 {
-                    Pair<Pair<Integer, Byte>, byte[]> chunkData = getChunk(i, oldHeader, oldData);
-                    byte[] old_chunk = decompressChunk(chunkData.second(), chunkData.first().second());
-                    ByteBuffer temp = ByteBuffer.allocate(1024 * 1024 + 4); //chunk can't be bigger than 1MiB
-                    temp.put(old_chunk);
                     byte[] diff = new byte[chunk_length_bytes];
                     newBuffer.get(diff, 0, chunk_length_bytes);
-                    newChunk = compressChunk(bufferToTrimmedArray(binaryHandler.combine(temp, diff)), decompressionType);
+                    byte[] new_chunk = decompressChunk(diff, (byte)2);
+
+                    Pair<Pair<Integer, Byte>, byte[]> chunkData = getChunk(i, oldHeader, oldData);
+                    byte[] old_chunk = decompressChunk(chunkData.second(), chunkData.first().second());
+                    ByteBuffer temp = ByteBuffer.allocate(Math.max(old_chunk.length, new_chunk.length) * 2);
+                    temp.put(old_chunk);
+                    newChunk = compressChunk(bufferToTrimmedArray(binaryHandler.combine(temp, new_chunk)), decompressionType);
                 }
                 swap.putInt(locationData.offset * 4096, newChunk.length+1);
                 swap.put(locationData.offset * 4096 + 4, decompressionType);
@@ -126,7 +128,7 @@ public class MCAHandler extends ITypeHandler
     @Override
     public int getInitBufferSize(int initDataLength)
     {
-        return 16*1024*1024; //I've never seen a region file much above 8MiB, even in modded worlds.
+        return 16*1024*1024; //Largest region file I've seen is <14MiB, on 2b2t
     }
 
     private ChunkLocation[] getLocations(ByteBuffer buffer)
@@ -203,8 +205,8 @@ public class MCAHandler extends ITypeHandler
                     }
                     else
                     {
-                        chunk_diff = binaryHandler.getDifference(decompressChunk(oldChunk.second(), oldChunk.first().second()),
-                                                                        decompressChunk(newChunk.second(), newChunk.first().second())).first();
+                        chunk_diff = compressChunk(binaryHandler.getDifference(decompressChunk(oldChunk.second(), oldChunk.first().second()),
+                                                                        decompressChunk(newChunk.second(), newChunk.first().second())).first(), (byte)2);
                     }
                     diffs.putInt(chunk_diff.length);
                     diffs.put(newChunk.first().second());
@@ -224,6 +226,38 @@ public class MCAHandler extends ITypeHandler
         {
             return new Pair<>(toReturn, new NoCompress());
         }
+    }
+
+    @Override
+    public boolean verify(ByteBuffer combined, ByteBuffer newData)
+    {
+        Pair<ChunkLocation[], int[]> combinedHeader = getHeader(combined);
+        Pair<ChunkLocation[], int[]> newHeader = getHeader(newData);
+
+        for (int i = 0; i < 1024; i++)
+        {
+            if (combinedHeader.second()[i] != newHeader.second()[i] || !combinedHeader.first()[i].equals(newHeader.first()[i]))
+            {
+                return false;
+            }
+            else
+            {
+                if (newHeader.first()[i].sectorCount != combinedHeader.first()[i].sectorCount)
+                {
+                    return false;
+                }
+                if (newHeader.first()[i].sectorCount != 0)
+                {
+                    Pair<Pair<Integer, Byte>, byte[]> oldChunk = getChunk(i, combinedHeader, combined);
+                    Pair<Pair<Integer, Byte>, byte[]> newChunk = getChunk(i, newHeader, newData);
+                    if (!Arrays.equals(oldChunk.second(), newChunk.second()))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     @Override
