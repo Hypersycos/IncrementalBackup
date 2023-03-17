@@ -9,14 +9,28 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.zip.*;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.InflaterInputStream;
 
 public class MCAHandler extends ITypeHandler
 {
     BinaryHandler binaryHandler = new BinaryHandler(16, 1024);
 
-    record ChunkLocation(int offset, byte sectorCount){
+    static final class ChunkLocation
+    {
+        private final int offset;
+        private final byte sectorCount;
+
+        ChunkLocation(int offset, byte sectorCount)
+        {
+            this.offset = offset;
+            this.sectorCount = sectorCount;
+        }
+
         @Override
         public boolean equals(Object o)
         {
@@ -33,6 +47,25 @@ public class MCAHandler extends ITypeHandler
         {
             return Objects.hash(offset, sectorCount);
         }
+
+        public int offset()
+        {
+            return offset;
+        }
+
+        public byte sectorCount()
+        {
+            return sectorCount;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ChunkLocation[" +
+                   "offset=" + offset + ", " +
+                   "sectorCount=" + sectorCount + ']';
+        }
+
     }
 
     @Override
@@ -56,7 +89,8 @@ public class MCAHandler extends ITypeHandler
                 {
                     swap.putInt(locationData.offset * 4096, chunk.first().first());
                     swap.put(locationData.offset * 4096 + 4, chunk.first().second());
-                    swap.put(locationData.offset * 4096 + 5, chunk.second());
+                    swap.position(locationData.offset * 4096 + 5);
+                    swap.put(chunk.second(),0, chunk.second().length);
                     int chunk_end = locationData.offset + locationData.sectorCount;
                     if (chunk_end > end)
                     {
@@ -88,7 +122,8 @@ public class MCAHandler extends ITypeHandler
                 }
                 swap.putInt(locationData.offset * 4096, newChunk.length+1);
                 swap.put(locationData.offset * 4096 + 4, decompressionType);
-                swap.put(locationData.offset * 4096 + 5, newChunk);
+                swap.position(locationData.offset * 4096 + 5);
+                swap.put(newChunk, 0, newChunk.length);
                 int chunk_end = locationData.offset + locationData.sectorCount;
                 if (chunk_end > end)
                 {
@@ -113,7 +148,8 @@ public class MCAHandler extends ITypeHandler
                 Pair<Pair<Integer, Byte>, byte[]> chunk = getChunk(i, oldHeader, oldData);
                 swap.putInt(oldHeader.first()[i].offset * 4096, chunk.first().first());
                 swap.put(oldHeader.first()[i].offset * 4096 + 4, chunk.first().second());
-                swap.put(oldHeader.first()[i].offset * 4096 + 5, chunk.second());
+                swap.position(oldHeader.first()[i].offset * 4096 + 5);
+                swap.put(chunk.second(), 0, chunk.second().length);
                 int chunk_end = oldHeader.first()[i].offset + oldHeader.first()[i].sectorCount;
                 if (chunk_end > end)
                 {
@@ -174,7 +210,8 @@ public class MCAHandler extends ITypeHandler
         int length = buffer.getInt(offset);
         byte decompressionType = buffer.get(offset+4);
         byte[] data = new byte[length-1];
-        buffer.get(offset+5, data, 0, length-1);
+        buffer.position(offset+5);
+        buffer.get(data, 0, length-1);
         return new Pair<>(new Pair<>(length, decompressionType), data);
     }
 
@@ -272,6 +309,12 @@ public class MCAHandler extends ITypeHandler
         return binaryHandler.getCompressionSchemes();
     }
 
+    @Override
+    public boolean isValidFile(byte[] data)
+    {
+        return data.length > 8*1024;
+    }
+
     private byte[] decompressChunk(byte[] chunk, byte decompressionType)
     {
         //1 == gzip, 2 == zlib, 3 == uncompressed
@@ -286,7 +329,7 @@ public class MCAHandler extends ITypeHandler
             ByteArrayInputStream bais = new ByteArrayInputStream(chunk);
             try(InflaterInputStream zis = new InflaterInputStream(bais))
             {
-                return zis.readAllBytes();
+                return ZipScheme.readAllBytes(zis);
             }
             catch (IOException e)
             {

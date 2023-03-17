@@ -63,6 +63,11 @@ public abstract class ITypeHandler
         return Arrays.equals(test, newData.array());
     }
 
+    public boolean isValidFile(byte[] data)
+    {
+        return true;
+    }
+
     /**
      * getDifference returns the data to be written to a file, representing the additions of newData to oldData
      * @param oldData old copy of file in byte array. Cannot be null.

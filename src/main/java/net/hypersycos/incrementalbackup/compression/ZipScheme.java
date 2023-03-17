@@ -5,7 +5,9 @@ import net.hypersycos.incrementalbackup.util.AlphaNumericString;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.zip.*;
+import java.io.InputStream;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.InflaterInputStream;
 
 public class ZipScheme extends CompressionScheme
 {
@@ -45,7 +47,33 @@ public class ZipScheme extends CompressionScheme
         ByteArrayInputStream bais = new ByteArrayInputStream(data);
         try(InflaterInputStream zis = new InflaterInputStream(bais))
         {
-            return zis.readAllBytes();
+            return readAllBytes(zis);
+        }
+    }
+
+    public static byte[] readAllBytes(InputStream inputStream) throws IOException {
+        final int bufLen = 4 * 0x400; // 4KB
+        byte[] buf = new byte[bufLen];
+        int readLen;
+        IOException exception = null;
+
+        try {
+            try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+                while ((readLen = inputStream.read(buf, 0, bufLen)) != -1)
+                    outputStream.write(buf, 0, readLen);
+
+                return outputStream.toByteArray();
+            }
+        } catch (IOException e) {
+            exception = e;
+            throw e;
+        } finally {
+            if (exception == null) inputStream.close();
+            else try {
+                inputStream.close();
+            } catch (IOException e) {
+                exception.addSuppressed(e);
+            }
         }
     }
 }

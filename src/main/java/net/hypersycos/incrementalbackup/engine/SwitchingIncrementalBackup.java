@@ -9,7 +9,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class SwitchingIncrementalBackup extends IncrementalBackup
 {
@@ -21,7 +25,7 @@ public class SwitchingIncrementalBackup extends IncrementalBackup
         super(directory, backupPath);
     }
 
-    public SwitchingIncrementalBackup(Path directory, Path backupPath, Set<Path> ignores) { super(directory, backupPath, ignores);}
+    public SwitchingIncrementalBackup(Path directory, Path backupPath, Set<Path> ignores) {super(directory, backupPath, ignores);}
 
     public void register(ITypeHandler handler, String... types)
     {
@@ -73,14 +77,27 @@ public class SwitchingIncrementalBackup extends IncrementalBackup
         }
         else
         {
-            byte[] newData = Files.readAllBytes(file);
             if (links == null || links.size() == 0)
             {
-                name.setCompression(handler.getInitCompression(newData));
-                Files.write(backupPath.resolve(name.toName()), name.getCompression().compress(newData));
+                byte[] newData = Files.readAllBytes(file);
+                if (handler.isValidFile(newData))
+                {
+                    name.setCompression(handler.getInitCompression(newData));
+                    Files.write(backupPath.resolve(name.toName()), name.getCompression().compress(newData));
+                }
+                else
+                {
+                    throw new IOException("File isn't valid");
+                }
             }
             else
             {
+                BasicFileAttributes fileAttributes = Files.readAttributes(file, BasicFileAttributes.class);
+                long lastChange = Math.max(fileAttributes.creationTime().toMillis(), fileAttributes.lastModifiedTime().toMillis());
+
+                if (lastBackup > lastChange) return;
+
+                byte[] newData = Files.readAllBytes(file);
                 byte[] oldData = handler.combineAll(links);
                 if (super.isDifferent(oldData, newData))
                 {
@@ -89,8 +106,7 @@ public class SwitchingIncrementalBackup extends IncrementalBackup
                     {
                         if (!handler.verify(oldData, data.first(), newData))
                         {
-                            System.out.println("Verification failed for "+file.toString());
-                            throw new IOException("Backup isn't equivalent to new file: "+file.toString());
+                            throw new IOException("Backup isn't equivalent to new file");
                         }
 
                         name.setCompression(data.second());

@@ -22,6 +22,7 @@ public class IncrementalBackup
     private final Path directory;
     private Set<Path> trackedFiles = new HashSet<>();
     private Set<Path> ignoredPaths;
+    protected long lastBackup;
 
     public IncrementalBackup(Path directory, Path backupPath)
     {
@@ -40,6 +41,7 @@ public class IncrementalBackup
         {
             fullBackupSequence = Integer.parseInt(journalScanner.nextLine());
             incrementalBackupSequence = Integer.parseInt(journalScanner.nextLine());
+            lastBackup = Long.parseLong(journalScanner.nextLine());
             while (journalScanner.hasNextLine())
             {
                 trackedFiles.add(Paths.get(journalScanner.nextLine()));
@@ -58,12 +60,15 @@ public class IncrementalBackup
      */
     private void writeJournal() throws IOException
     {
+        lastBackup = System.currentTimeMillis();
         File tempJournal = File.createTempFile("tempJournal",".tmp");
         try(BufferedWriter bw = new BufferedWriter(new FileWriter(tempJournal)))
         {
             bw.write(String.valueOf(fullBackupSequence));
             bw.newLine();
             bw.write(String.valueOf(incrementalBackupSequence));
+            bw.newLine();
+            bw.write(String.valueOf(lastBackup));
             bw.newLine();
             for (Path path : trackedFiles)
             {
@@ -206,7 +211,7 @@ public class IncrementalBackup
     public synchronized void performFullBackup() throws IOException
     {
         Set<Path> newTrackedFiles = Collections.synchronizedSet(new HashSet<>());
-        Set<Exception> exceptions = Collections.synchronizedSet(new HashSet<>());
+        Set<Pair<Path,Exception>> exceptions = Collections.synchronizedSet(new HashSet<>());
         backupDirectory(directory, newTrackedFiles, exceptions, true, null);
         trackedFiles = newTrackedFiles;
 
@@ -232,7 +237,7 @@ public class IncrementalBackup
     public synchronized void performIncrementalBackup() throws IOException
     {
         Set<Path> newTrackedFiles = Collections.synchronizedSet(new HashSet<>());
-        Set<Exception> exceptions = Collections.synchronizedSet(new HashSet<>());
+        Set<Pair<Path,Exception>> exceptions = Collections.synchronizedSet(new HashSet<>());
         backupDirectory(directory, newTrackedFiles, exceptions, false, generateBackupLinks());
         for (Path path : trackedFiles)
         {
@@ -245,11 +250,11 @@ public class IncrementalBackup
                 try
                 {
                     if (!getBackupParentPath(path).resolve(name).toFile().createNewFile())
-                        exceptions.add(new IOException("Unable to create "+name));
+                        exceptions.add(new Pair<>(path, new IOException("Unable to create "+name)));
                 }
                 catch (IOException e)
                 {
-                    exceptions.add(new IOException("Unable to create "+name));
+                    exceptions.add(new Pair<>(path, new IOException("Unable to create "+name)));
                 }
             }
         }
@@ -257,12 +262,11 @@ public class IncrementalBackup
 
         if (exceptions.size() > 0)
         {
-            for (Exception e : exceptions)
+            for (Pair<Path, Exception> e : exceptions)
             {
-                System.err.println(e.toString());
+                System.err.println(e.first().toString()+": "+e.second().toString());
             }
         }
-
         incrementalBackupSequence++;
         try
         {
@@ -283,12 +287,12 @@ public class IncrementalBackup
      * @param isFullBackup Is this a full or incremental backup?
      * @throws NullPointerException Thrown if directory doesn't exist
      */
-    private void backupDirectory(Path directory, Set<Path> trackedFiles, Set<Exception> failures, boolean isFullBackup, Map<Path, List<Path>> links) throws NullPointerException
+    private void backupDirectory(Path directory, Set<Path> trackedFiles, Set<Pair<Path,Exception>> failures, boolean isFullBackup, Map<Path, List<Path>> links) throws NullPointerException
     {
         Path backupDir = getBackupPath(directory);
         if (!Files.exists(backupDir) && !backupDir.toFile().mkdirs())
         {
-            failures.add(new IOException("Unable to create "+backupDir));
+            failures.add(new Pair<>(directory, new IOException("Unable to create "+backupDir)));
             return;
         }
         for (File file : Objects.requireNonNull(directory.toFile().listFiles()))
@@ -309,7 +313,7 @@ public class IncrementalBackup
             }
             catch (IOException e)
             {
-                failures.add(e);
+                failures.add(new Pair<>(path, e));
                 continue;
             }
 
@@ -332,9 +336,9 @@ public class IncrementalBackup
                     }
                     trackedFiles.add(path);
                 }
-                catch (IOException e)
+                catch (Exception e)
                 {
-                    failures.add(e);
+                    failures.add(new Pair<>(path, e));
                 }
             }
         }

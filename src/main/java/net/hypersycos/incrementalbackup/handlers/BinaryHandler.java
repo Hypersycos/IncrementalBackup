@@ -6,6 +6,8 @@ import net.hypersycos.incrementalbackup.compression.ZipScheme;
 import net.hypersycos.incrementalbackup.util.Pair;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Set;
 
 public class BinaryHandler extends ITypeHandler
@@ -55,7 +57,8 @@ public class BinaryHandler extends ITypeHandler
 
             if (length * block_size > oldData.capacity())
             {
-                ByteBuffer temp = ByteBuffer.allocate(oldData.capacity() * 2);
+                int newCap = Math.max(oldData.capacity(), length * block_size) * 2;
+                ByteBuffer temp = ByteBuffer.allocate(newCap);
                 oldData.position(Math.min(length * block_size, oldData.capacity()));
                 oldData.flip();
                 temp.put(oldData);
@@ -64,7 +67,8 @@ public class BinaryHandler extends ITypeHandler
 
             byte[] block = new byte[my_block_size];
             newBuffer.get(block, 0, my_block_size);
-            oldData.put(block_id*block_size, block);
+            oldData.position(block_id*block_size);
+            oldData.put(block, 0, block.length);
             oldData.position(0);
             //reset to position 0 so we index bytebuffer correctly
         }
@@ -75,7 +79,9 @@ public class BinaryHandler extends ITypeHandler
     @Override
     public Pair<byte[], CompressionScheme> getDifference(byte[] oldData, byte[] newData)
     {
-        ByteBuffer diffs = ByteBuffer.allocate(Math.max(oldData.length,newData.length)*2 + 8);
+        int biggerLength = Math.max(oldData.length,newData.length)*2;
+        int numBlocks = biggerLength / block_size + 1;
+        ByteBuffer diffs = ByteBuffer.allocate(Math.max(oldData.length,newData.length)*2 + 8 + 4 * numBlocks);
         //this buffer should? always be big enough to avoid overflow
         ByteBuffer oldBuffer = ByteBuffer.wrap(oldData);
         ByteBuffer newBuffer = ByteBuffer.wrap(newData);
@@ -160,6 +166,6 @@ public class BinaryHandler extends ITypeHandler
     @Override
     public Set<CompressionScheme> getCompressionSchemes()
     {
-        return Set.of(new ZipScheme(), new NoCompress());
+        return new HashSet<CompressionScheme>(Arrays.asList(new ZipScheme(), new NoCompress()));
     }
 }

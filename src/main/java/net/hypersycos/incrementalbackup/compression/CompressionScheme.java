@@ -3,6 +3,7 @@ package net.hypersycos.incrementalbackup.compression;
 import net.hypersycos.incrementalbackup.util.AlphaNumericString;
 
 import java.io.IOException;
+import java.util.Objects;
 
 public abstract class CompressionScheme
 {
@@ -29,10 +30,13 @@ public abstract class CompressionScheme
 
     public static CompressionScheme getScheme(String id, String flags)
     {
-        return switch (id)
-                {
-                    default -> new NoCompress();
-                    case "z" -> new ZipScheme();
-                };
+        if (Objects.equals(id, "z"))
+        {
+            return new ZipScheme();
+        }
+        else
+        {
+            return new NoCompress();
+        }
     }
 }
